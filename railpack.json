@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.railpack.com",
-  "provider": "nodejs",
+  "provider": "node",
   "packages": {
     "nodejs": "20"
   },
