@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { Server as SSEServer } from '@modelcontextprotocol/sdk/server/sse.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
@@ -16,29 +16,26 @@ app.get('/health', (req, res) => {
 });
 
 // Создаем MCP сервер
-const mcpServer = new McpServer({
+const server = new McpServer({
   name: 'Yandex Music MCP Server',
   version: '1.0.0',
 });
 
 // Регистрируем инструмент для поиска музыки
-mcpServer.tool(
+server.tool(
   'search_yandex_music',
   'Search for a track on Yandex Music by query',
   {
     query: z.string().describe('Search query (track name or artist)'),
   },
   async ({ query }) => {
-    // ВАШ ТОКЕН ЯНДЕКСА
-    const YANDEX_TOKEN = 'ваш_токен_яндекса';
+    const YANDEX_TOKEN = 'ваш_токен_яндекса'; // Замените на ваш токен
     
     try {
       const response = await fetch(
         `https://api.music.yandex.net/search?type=track&text=${encodeURIComponent(query)}`,
         {
-          headers: {
-            'Authorization': `OAuth ${YANDEX_TOKEN}`
-          }
+          headers: { 'Authorization': `OAuth ${YANDEX_TOKEN}` }
         }
       );
       
@@ -47,51 +44,46 @@ mcpServer.tool(
       if (data.result?.tracks?.results?.length > 0) {
         const track = data.result.tracks.results[0];
         return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify({
-                success: true,
-                title: track.title,
-                artist: track.artists[0]?.name,
-                trackId: track.id
-              })
-            }
-          ]
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              title: track.title,
+              artist: track.artists[0]?.name
+            })
+          }]
         };
       } else {
         return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify({ success: false, message: 'Ничего не найдено' })
-            }
-          ]
+          content: [{
+            type: 'text',
+            text: JSON.stringify({ success: false, message: 'Ничего не найдено' })
+          }]
         };
       }
     } catch (error) {
       return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({ success: false, error: error.message })
-          }
-        ]
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ success: false, error: error.message })
+        }]
       };
     }
   }
 );
 
-// Создаем SSE сервер
-const sseServer = new SSEServer(mcpServer);
+// Создаем транспорт для Streamable HTTP
+const transport = new StreamableHTTPServerTransport({
+  sessionIdGenerator: () => crypto.randomUUID(),
+});
 
-// Эндпоинт для SSE подключений
-app.get('/mcp/sse', (req, res) => {
-  sseServer.handleRequest(req, res);
+// Эндпоинт для MCP (поддерживает GET и POST)
+app.use('/mcp/sse', async (req, res) => {
+  await transport.handleRequest(req, res, server);
 });
 
 app.listen(PORT, () => {
   console.log(`MCP Server running on port ${PORT}`);
-  console.log(`Health check: http://localhost:${PORT}/health`);
-  console.log(`SSE endpoint: http://localhost:${PORT}/mcp/sse`);
+  console.log(`Health: http://localhost:${PORT}/health`);
+  console.log(`MCP endpoint: http://localhost:${PORT}/mcp/sse`);
 });
