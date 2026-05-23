@@ -1,70 +1,40 @@
 import express from 'express';
+import cors from 'cors';
+import { Server as SSEServer } from '@modelcontextprotocol/sdk/server/sse.js';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from 'zod';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
+app.use(cors());
 app.use(express.json());
 
-// Health check для Railway
+// Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Главный MCP endpoint для XiaoZhi
-app.get('/mcp/sse', (req, res) => {
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  
-  // Отправка приветственного события
-  res.write(`data: ${JSON.stringify({ type: 'connected', message: 'MCP Server Ready' })}\n\n`);
+// Создаем MCP сервер
+const mcpServer = new McpServer({
+  name: 'Yandex Music MCP Server',
+  version: '1.0.0',
 });
 
-// Пример MCP инструмента для поиска музыки
-app.post('/mcp/tools/search', async (req, res) => {
-  const { query } = req.body;
-  
-  // Здесь будет код для Яндекс Музыки после настройки
-  // Пока возвращаем заглушку
-  
-  res.json({
-    success: true,
-    tool: "search_yandex_music",
-    result: `Поиск: ${query}`,
-    message: "Интеграция с Яндекс Музыкой готовится"
-  });
-});
-// Эндпоинт для поиска музыки в Яндекс
-app.post('/mcp/tools/search_yandex_music', async (req, res) => {
-  const { query } = req.body;
-  
-  // Ваш OAuth токен Яндекс Музыки
-  const YANDEX_TOKEN = 'y0__wgBEMm-8R8Y3vgGILO7xcsXpuQqXnDOKUYPn0HtK69BDbHxwmg';  // <-- ВСТАВЬТЕ СВОЙ ТОКЕН
-  
-  try {
-    // Запрос к API Яндекс Музыки
-    const response = await fetch(
-      `https://api.music.yandex.net/search?type=track&text=${encodeURIComponent(query)}`,
-      {
-        headers: {
-          'Authorization': `OAuth ${YANDEX_TOKEN}`
-        }
-      }
-    );
+// Регистрируем инструмент для поиска музыки
+mcpServer.tool(
+  'search_yandex_music',
+  'Search for a track on Yandex Music by query',
+  {
+    query: z.string().describe('Search query (track name or artist)'),
+  },
+  async ({ query }) => {
+    // ВАШ ТОКЕН ЯНДЕКСА
+    const YANDEX_TOKEN = 'ваш_токен_яндекса';
     
-    const data = await response.json();
-    
-    // Проверяем, есть ли результаты
-    if (data.result && data.result.tracks && data.result.tracks.results.length > 0) {
-      const track = data.result.tracks.results[0];
-      const trackId = track.id;
-      const title = track.title;
-      const artist = track.artists[0].name;
-      
-      // Получаем ссылку для воспроизведения
-      const downloadResponse = await fetch(
-        `https://api.music.yandex.net/tracks/${trackId}/download-info`,
+    try {
+      const response = await fetch(
+        `https://api.music.yandex.net/search?type=track&text=${encodeURIComponent(query)}`,
         {
           headers: {
             'Authorization': `OAuth ${YANDEX_TOKEN}`
@@ -72,35 +42,56 @@ app.post('/mcp/tools/search_yandex_music', async (req, res) => {
         }
       );
       
-      const downloadData = await downloadResponse.json();
+      const data = await response.json();
       
-      // Находим ссылку на mp3 (обычно с кодеком 'mp3')
-      const mp3Info = downloadData.result.find(d => d.codec === 'mp3');
-      
-      res.json({
-        success: true,
-        track: {
-          title: title,
-          artist: artist,
-          url: mp3Info ? mp3Info.downloadInfoUrl : null
-        }
-      });
-    } else {
-      res.json({
-        success: false,
-        message: 'Ничего не найдено'
-      });
+      if (data.result?.tracks?.results?.length > 0) {
+        const track = data.result.tracks.results[0];
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                title: track.title,
+                artist: track.artists[0]?.name,
+                trackId: track.id
+              })
+            }
+          ]
+        };
+      } else {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({ success: false, message: 'Ничего не найдено' })
+            }
+          ]
+        };
+      }
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({ success: false, error: error.message })
+          }
+        ]
+      };
     }
-  } catch (error) {
-    res.json({
-      success: false,
-      error: error.message
-    });
   }
+);
+
+// Создаем SSE сервер
+const sseServer = new SSEServer(mcpServer);
+
+// Эндпоинт для SSE подключений
+app.get('/mcp/sse', (req, res) => {
+  sseServer.handleRequest(req, res);
 });
-// Запуск сервера
+
 app.listen(PORT, () => {
   console.log(`MCP Server running on port ${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/health`);
-  console.log(`MCP SSE endpoint: http://localhost:${PORT}/mcp/sse`);
+  console.log(`SSE endpoint: http://localhost:${PORT}/mcp/sse`);
 });
