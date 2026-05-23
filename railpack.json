@@ -1,0 +1,23 @@
+{
+  "$schema": "https://schema.railpack.com",
+  "provider": "nodejs",
+  "packages": {
+    "nodejs": "20"
+  },
+  "steps": {
+    "install": {
+      "commands": [
+        "npm install"
+      ]
+    },
+    "build": {
+      "commands": [
+        "npm run build"
+      ]
+    }
+  },
+  "deploy": {
+    "startCommand": "npm start",
+    "port": 3000
+  }
+}
